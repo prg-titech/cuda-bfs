@@ -1,11 +1,7 @@
-// Accelerating large graph algorithms on the GPU using CUDA
-// http://dl.acm.org/citation.cfm?id=1782200
-
-__global__ void kernel_cuda_frontier_numbers(
-    int *v_adj_list,
-    int *v_adj_begin,
-    int *v_adj_length,
-    int num_vertices,
+__global__ void kernel_cuda_per_edge_frontier_numbers(
+    int *v_adj_from,
+    int *v_adj_to,
+    int num_edges,
     int *result,
     bool *still_running,
     int iteration)
@@ -13,32 +9,26 @@ __global__ void kernel_cuda_frontier_numbers(
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int num_threads = blockDim.x * gridDim.x;
 
-    if (tid == 0)
+    for (int e = 0; e < num_edges; e += num_threads)
     {
-        *still_running = false;
-    }
+        int edge = e + tid;
 
-    for (int v = 0; v < num_vertices; v += num_threads)
-    {
-        int vertex = v + tid;
-
-        if (vertex < num_vertices && result[vertex] == iteration)
+        if (edge < num_edges)
         {
-            for (int n = 0; n < v_adj_length[vertex]; n++)
-            {
-                int neighbor = v_adj_list[v_adj_begin[vertex] + n];
+            int from_vertex = v_adj_from[edge];
+            int to_vertex = v_adj_to[edge];
 
-                if (result[neighbor] == MAX_DIST)
-                {
-                    result[neighbor] = iteration + 1;
-                    *still_running = true;
-                }
+            if (result[from_vertex] == iteration && result[to_vertex] == MAX_DIST)
+            {
+                result[to_vertex] = iteration + 1;
+                *still_running = true;
             }
         }
+
     }
 }
 
-void bfs_cuda_frontier_numbers(
+void bfs_cuda_per_edge_frontier_numbers(
     int *v_adj_list,
     int *v_adj_begin, 
     int *v_adj_length, 
@@ -47,9 +37,23 @@ void bfs_cuda_frontier_numbers(
     int start_vertex, 
     int *result)
 {
-    int *k_v_adj_list;
-    int *k_v_adj_begin;
-    int *k_v_adj_length;
+    // Convert data
+    // TODO: Check if it is better to allocate only one array
+    int *v_adj_from = new int[num_edges];
+    int *v_adj_to = new int[num_edges];
+
+    int next_index = 0;
+    for (int i = 0; i < num_vertices; i++)
+    {
+        for (int j = v_adj_begin[i]; j < v_adj_length[i] + v_adj_begin[i]; j++)
+        {
+            v_adj_from[next_index] = i;
+            v_adj_to[next_index++] = v_adj_list[j];
+        }
+    }
+
+    int *k_v_adj_from;
+    int *k_v_adj_to;
     int *k_result;
     bool *k_still_running;
 
@@ -60,15 +64,13 @@ void bfs_cuda_frontier_numbers(
 
     bool *still_running = new bool[1];
 
-    cudaMalloc(&k_v_adj_list, sizeof(int) * num_edges);
-    cudaMalloc(&k_v_adj_begin, sizeof(int) * num_vertices);
-    cudaMalloc(&k_v_adj_length, sizeof(int) * num_vertices);
+    cudaMalloc(&k_v_adj_from, sizeof(int) * num_edges);
+    cudaMalloc(&k_v_adj_to, sizeof(int) * num_edges);
     cudaMalloc(&k_result, sizeof(int) * num_vertices);
     cudaMalloc(&k_still_running, sizeof(bool) * 1);
 
-    cudaMemcpy(k_v_adj_list, v_adj_list, sizeof(int) * num_edges, cudaMemcpyHostToDevice);
-    cudaMemcpy(k_v_adj_begin, v_adj_begin, sizeof(int) * num_vertices, cudaMemcpyHostToDevice);
-    cudaMemcpy(k_v_adj_length, v_adj_length, sizeof(int) * num_vertices, cudaMemcpyHostToDevice);
+    cudaMemcpy(k_v_adj_from, v_adj_from, sizeof(int) * num_edges, cudaMemcpyHostToDevice);
+    cudaMemcpy(k_v_adj_to, v_adj_to, sizeof(int) * num_edges, cudaMemcpyHostToDevice);
     cudaMemcpy(k_result, result, sizeof(int) * num_vertices, cudaMemcpyHostToDevice);
 
 
@@ -82,11 +84,10 @@ void bfs_cuda_frontier_numbers(
         *still_running = false;
         cudaMemcpy(k_still_running, still_running, sizeof(bool) * 1, cudaMemcpyHostToDevice);
 
-        kernel_cuda_frontier_numbers<<<BLOCKS, THREADS>>>(
-            k_v_adj_list, 
-            k_v_adj_begin, 
-            k_v_adj_length, 
-            num_vertices, 
+        kernel_cuda_per_edge_frontier_numbers<<<BLOCKS, THREADS>>>(
+            k_v_adj_from, 
+            k_v_adj_to, 
+            num_edges, 
             k_result, 
             k_still_running,
             kernel_runs);
@@ -110,14 +111,15 @@ void bfs_cuda_frontier_numbers(
     // --- END MEASURE TIME ---
 
 
-
     cudaMemcpy(result, k_result, sizeof(int) * num_vertices, cudaMemcpyDeviceToHost);
 
-    cudaFree(k_v_adj_list);
-    cudaFree(k_v_adj_begin);
-    cudaFree(k_v_adj_length);
+    cudaFree(k_v_adj_from);
+    cudaFree(k_v_adj_to);
     cudaFree(k_result);
     cudaFree(k_still_running);
+
+    free(v_adj_from);
+    free(v_adj_to);
 
     // printf("%i kernel runs\n", kernel_runs);
 }

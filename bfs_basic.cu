@@ -7,10 +7,11 @@
 #include <vector>
 #include <map>
 #include <iterator>
+#include <chrono>
 
 using namespace std;
 
-#define BLOCKS 16
+#define BLOCKS 256
 #define THREADS 256
 
 #define MAX_DIST 32768
@@ -34,11 +35,15 @@ struct graph_t
     int num_edges;
 };
 
+bool report_time = false;
+
 #include "bfs_cpu.cu"
 #include "bfs_cuda_simple.cu"
 #include "bfs_cuda_frontier.cu"
 #include "bfs_cuda_frontier_numbers.cu"
 #include "bfs_cuda_virtual_warp_centric.cu"
+#include "bfs_cuda_per_edge_basic.cu"
+#include "bfs_cuda_per_edge_frontier_numbers.cu"
 
 typedef void (* bfs_func)(int*, int*, int*, int, int, int, int*);
 
@@ -76,23 +81,35 @@ void run_all_bfs(graph_t *graph, int start_vertex)
     // Run BFS
     int *result = new int[graph->num_vertices];
     bfs_sequential(graph, start_vertex, result);
-    printf(".");
 
     // Run BFS on CUDA
     run_bfs(&bfs_cuda_simple, graph, start_vertex, result);
-    printf("A");
+    //printf("A");
 
     // Run BFS on CUDA - frontier
     run_bfs(&bfs_cuda_frontier, graph, start_vertex, result);
-    printf("B");
+    //printf("B");
 
     // Run BFS on CUDA - frontier as number
     run_bfs(&bfs_cuda_frontier_numbers, graph, start_vertex, result);
-    printf("C");
+    //printf("C");
 
     // Run BFS on CUDA - virtual warp centric
     run_bfs(&bfs_cuda_virtual_wc, graph, start_vertex, result);
-    printf("D");
+    //printf("D");
+
+    // Run BFS on CUDA - parallelize per edges
+    run_bfs(&bfs_cuda_per_edge_basic, graph, start_vertex, result);
+    //printf("E");
+
+    // Run BFS on CUDA - parallelize per edges, frontier as number
+    run_bfs(&bfs_cuda_per_edge_frontier_numbers, graph, start_vertex, result);
+    //printf("F");
+
+    if (!report_time)
+    {
+        printf(".\n");
+    }
 
     free(result);
     fflush(stdout);
@@ -191,7 +208,7 @@ int main(int argc, char *argv[])
     graph->num_vertices = num_vertices;
     graph->num_edges = num_edges;
 
-    printf("Running ");
+    printf("Running...\n");
     if (start_vertex == -1)
     {
         for (int i = 0; i < graph->num_vertices; i++)
@@ -201,6 +218,7 @@ int main(int argc, char *argv[])
     }
     else
     {
+        report_time = true;
         run_all_bfs(graph, start_vertex);
     }
 

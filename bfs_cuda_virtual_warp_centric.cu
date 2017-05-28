@@ -82,6 +82,12 @@ void bfs_cuda_virtual_wc(
     cudaMemcpy(k_v_adj_length, v_adj_length, sizeof(int) * num_vertices, cudaMemcpyHostToDevice);
     cudaMemcpy(k_result, result, sizeof(int) * num_vertices, cudaMemcpyHostToDevice);
 
+
+    // --- START MEASURE TIME ---
+
+
+    auto start_time = chrono::high_resolution_clock::now();
+
     do
     {
         *still_running = false;
@@ -100,6 +106,20 @@ void bfs_cuda_virtual_wc(
 
         cudaMemcpy(still_running, k_still_running, sizeof(bool) * 1, cudaMemcpyDeviceToHost);
     } while (*still_running);
+
+    cudaThreadSynchronize();
+
+    auto end_time = chrono::high_resolution_clock::now();
+    long long time = chrono::duration_cast<chrono::microseconds>(end_time - start_time).count();
+
+    if (report_time)
+    {
+        printf("%s,%i,%i,%i,%i,%lld\n", __FILE__, num_vertices, num_edges, BLOCKS, THREADS, time); 
+    }
+
+
+    // --- END MEASURE TIME ---
+
 
     cudaMemcpy(result, k_result, sizeof(int) * num_vertices, cudaMemcpyDeviceToHost);
 

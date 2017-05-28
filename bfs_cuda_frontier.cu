@@ -55,7 +55,7 @@ __global__ void kernel_cuda_frontier_update_flags(
     for (int v = 0; v < num_vertices; v += num_threads)
     {
         int vertex = v + tid;
-        
+
         if (vertex < num_vertices && updated[vertex])
         {
             frontier[vertex] = true;
@@ -119,6 +119,12 @@ void bfs_cuda_frontier(
     cudaMemcpy(k_visited, visited, sizeof(bool) * num_vertices, cudaMemcpyHostToDevice);
     cudaMemcpy(k_frontier, frontier, sizeof(bool) * num_vertices, cudaMemcpyHostToDevice);
 
+
+    // --- START MEASURE TIME ---
+
+
+    auto start_time = chrono::high_resolution_clock::now();
+
     *still_running = true;
 
     while (*still_running)
@@ -149,6 +155,20 @@ void bfs_cuda_frontier(
 
         cudaMemcpy(still_running, k_still_running, sizeof(bool) * 1, cudaMemcpyDeviceToHost);
     }
+
+    cudaThreadSynchronize();
+
+    auto end_time = chrono::high_resolution_clock::now();
+    long long time = chrono::duration_cast<chrono::microseconds>(end_time - start_time).count();
+
+    if (report_time)
+    {
+        printf("%s,%i,%i,%i,%i,%lld\n", __FILE__, num_vertices, num_edges, BLOCKS, THREADS, time); 
+    }
+
+
+    // --- END MEASURE TIME ---
+
 
     cudaMemcpy(result, k_result, sizeof(int) * num_vertices, cudaMemcpyDeviceToHost);
 
