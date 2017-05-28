@@ -12,7 +12,7 @@
 using namespace std;
 
 #define BLOCKS 256
-#define THREADS 256
+#define THREADS 512
 
 #define MAX_DIST 32768
 
@@ -44,6 +44,7 @@ bool report_time = false;
 #include "bfs_cuda_virtual_warp_centric.cu"
 #include "bfs_cuda_per_edge_basic.cu"
 #include "bfs_cuda_per_edge_frontier_numbers.cu"
+#include "bfs_cuda_frontier_queue.cu"
 
 typedef void (* bfs_func)(int*, int*, int*, int, int, int, int*);
 
@@ -105,6 +106,10 @@ void run_all_bfs(graph_t *graph, int start_vertex)
     // Run BFS on CUDA - parallelize per edges, frontier as number
     run_bfs(&bfs_cuda_per_edge_frontier_numbers, graph, start_vertex, result);
     //printf("F");
+
+    // Run BFS on CUDA - parallelize per edges, frontier as number
+    run_bfs(&bfs_cuda_frontier_queue, graph, start_vertex, result);
+    //printf("G");
 
     if (!report_time)
     {

@@ -24,7 +24,6 @@ __global__ void kernel_cuda_per_edge_frontier_numbers(
                 *still_running = true;
             }
         }
-
     }
 }
 

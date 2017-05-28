@@ -13,11 +13,6 @@ __global__ void kernel_cuda_frontier_numbers(
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int num_threads = blockDim.x * gridDim.x;
 
-    if (tid == 0)
-    {
-        *still_running = false;
-    }
-
     for (int v = 0; v < num_vertices; v += num_threads)
     {
         int vertex = v + tid;
