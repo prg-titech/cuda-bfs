@@ -1,9 +1,10 @@
 // Accelerating large graph algorithms on the GPU using CUDA
 // http://dl.acm.org/citation.cfm?id=1782200
 
-#define BLOCK_QUEUE_SIZE 8192
+#define BLOCK_QUEUE_SIZE 2048
+#define W_SZ 16
 
-__global__ void kernel_cuda_frontier_queue(
+__global__ void kernel_cuda_frontier_queue_virtual_wc(
     int *v_adj_list,
     int *v_adj_begin,
     int *v_adj_length,
@@ -24,8 +25,6 @@ __global__ void kernel_cuda_frontier_queue(
         input_queue_size = *input_queue;
     }
 
-    __syncthreads();
-
     __shared__ int queue_size;
     __shared__ int next_queue[BLOCK_QUEUE_SIZE];
 
@@ -36,23 +35,32 @@ __global__ void kernel_cuda_frontier_queue(
 
     __syncthreads();
 
-    for (int v = 0; v < input_queue_size; v += num_threads)
+    for (int v2 = 0; v2 < num_vertices; v2 += num_threads)
     {
-        if (v + tid < input_queue_size)
+        int vertex2 = v2 + tid;
+
+        // W_SZ many threads are processing vertex2
+        int warp_id = vertex2 / W_SZ;
+        int warp_offset = vertex2 % W_SZ;
+
+        for (int v = 0; v < input_queue_size; v += num_threads)
         {
-            int vertex = input_queue[v + tid + 1];
-
-            for (int n = 0; n < v_adj_length[vertex]; n++)
+            if (v + tid < input_queue_size)
             {
-                int neighbor = v_adj_list[v_adj_begin[vertex] + n];
+                int vertex = input_queue[v + tid + 1];
 
-                if (result[neighbor] == MAX_DIST)
+                for (int n = 0; n < v_adj_length[vertex]; n++)
                 {
-                    result[neighbor] = iteration + 1;
+                    int neighbor = v_adj_list[v_adj_begin[vertex] + n];
 
-                    // Add to queue (atomicAdd returns original value)
-                    int position = atomicAdd(&queue_size, 1);
-                    next_queue[position] = neighbor;
+                    if (result[neighbor] == MAX_DIST)
+                    {
+                        result[neighbor] = iteration + 1;
+
+                        // Add to queue (atomicAdd returns original value)
+                        int position = atomicAdd(&queue_size, 1);
+                        next_queue[position] = neighbor;
+                    }
                 }
             }
         }
@@ -80,7 +88,7 @@ __global__ void kernel_cuda_frontier_queue(
     }
 }
 
-int bfs_cuda_frontier_queue(
+int bfs_cuda_frontier_queue_virtual_wc(
     int *v_adj_list,
     int *v_adj_begin, 
     int *v_adj_length, 
@@ -89,6 +97,8 @@ int bfs_cuda_frontier_queue(
     int start_vertex, 
     int *result)
 {
+    return;
+    
     int *k_v_adj_list;
     int *k_v_adj_begin;
     int *k_v_adj_length;
@@ -135,7 +145,7 @@ int bfs_cuda_frontier_queue(
         int blocks = min(BLOCKS, max(1, *input_queue_size / THREADS));
         int threads = *input_queue_size <= THREADS ? *input_queue_size : THREADS;
 
-        kernel_cuda_frontier_queue<<<blocks, threads>>>(
+        kernel_cuda_frontier_queue_virtual_wc<<<blocks, threads>>>(
             k_v_adj_list, 
             k_v_adj_begin, 
             k_v_adj_length, 

@@ -5,6 +5,10 @@ void bfs_sequential(
     int start_vertex, 
     int *result)
 {
+    bool *visited = new bool[graph->num_vertices];
+    fill_n(visited, graph->num_vertices, 0);
+    visited[start_vertex] = true;
+    
     fill_n(result, graph->num_vertices, MAX_DIST);
     result[start_vertex] = 0;
 
@@ -23,8 +27,9 @@ void bfs_sequential(
         {
             int neighbor = graph->v_adj_list[n];
 
-            if (result[neighbor] > result[vertex] + 1)
+            if (!visited[neighbor])
             {
+                visited[neighbor] = true;
                 result[neighbor] = result[vertex] + 1;
                 next_vertices.push(neighbor);
             }

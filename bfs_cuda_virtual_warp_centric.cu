@@ -49,7 +49,7 @@ __global__ void kernel_cuda_virtual_wc(
     }
 }
 
-void bfs_cuda_virtual_wc(
+int bfs_cuda_virtual_wc(
     int *v_adj_list,
     int *v_adj_begin, 
     int *v_adj_length, 
@@ -130,4 +130,6 @@ void bfs_cuda_virtual_wc(
     cudaFree(k_still_running);
 
     // printf("%i kernel runs\n", kernel_runs);
+
+    return time;
 }

@@ -29,7 +29,7 @@ __global__ void kernel_cuda_simple(
     }
 }
 
-void bfs_cuda_simple(
+int bfs_cuda_simple(
     int *v_adj_list,
     int *v_adj_begin, 
     int *v_adj_length, 
@@ -67,7 +67,7 @@ void bfs_cuda_simple(
 
     auto start_time = chrono::high_resolution_clock::now();
 
-    while (*still_running)
+    do
     {
         cudaMemcpy(k_still_running, &false_value, sizeof(bool) * 1, cudaMemcpyHostToDevice);
 
@@ -79,12 +79,10 @@ void bfs_cuda_simple(
             k_result, 
             k_still_running);
 
-        cudaThreadSynchronize();
-
         kernel_runs++;
 
         cudaMemcpy(still_running, k_still_running, sizeof(bool) * 1, cudaMemcpyDeviceToHost);
-    }
+    } while (*still_running);
 
     cudaThreadSynchronize();
 
@@ -109,4 +107,6 @@ void bfs_cuda_simple(
     cudaFree(k_still_running);
 
     // printf("%i kernel runs\n", kernel_runs);
+
+    return time;
 }

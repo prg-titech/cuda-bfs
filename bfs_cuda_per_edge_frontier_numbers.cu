@@ -27,7 +27,7 @@ __global__ void kernel_cuda_per_edge_frontier_numbers(
     }
 }
 
-void bfs_cuda_per_edge_frontier_numbers(
+int bfs_cuda_per_edge_frontier_numbers(
     int *v_adj_list,
     int *v_adj_begin, 
     int *v_adj_length, 
@@ -121,4 +121,6 @@ void bfs_cuda_per_edge_frontier_numbers(
     free(v_adj_to);
 
     // printf("%i kernel runs\n", kernel_runs);
+
+    return time;
 }

@@ -1,7 +1,7 @@
 // Accelerating large graph algorithms on the GPU using CUDA
 // http://dl.acm.org/citation.cfm?id=1782200
 
-__global__ void kernel_cuda_frontier_numbers(
+__global__ void kernel_cuda_frontier_numbers_reorder(
     int *v_adj_list,
     int *v_adj_begin,
     int *v_adj_length,
@@ -33,13 +33,13 @@ __global__ void kernel_cuda_frontier_numbers(
     }
 }
 
-int bfs_cuda_frontier_numbers(
-    int *v_adj_list,
-    int *v_adj_begin, 
-    int *v_adj_length, 
+int bfs_cuda_frontier_numbers_reorder(
+    int *v_adj_list_u,
+    int *v_adj_begin_u, 
+    int *v_adj_length_u, 
     int num_vertices, 
     int num_edges,
-    int start_vertex, 
+    int start_vertex_u, 
     int *result)
 {
     int *k_v_adj_list;
@@ -51,9 +51,39 @@ int bfs_cuda_frontier_numbers(
     int kernel_runs = 0;
 
     fill_n(result, num_vertices, MAX_DIST);
-    result[start_vertex] = 0;
 
     bool *still_running = new bool[1];
+
+    // Generate reordering
+    // pair<degree, index>
+    pair<int, int> *sorted = new pair<int, int>[num_vertices];
+    for (int i = 0; i < num_vertices; i++)
+    {
+        sorted[i].first = v_adj_length_u[i];
+        sorted[i].second = i;
+    }
+    sort(sorted, sorted + num_vertices);
+
+    int *mapping_old_to_new = new int[num_vertices];
+    int *v_adj_list = new int[num_edges];
+    int *v_adj_begin = new int[num_vertices];
+    int *v_adj_length = new int[num_vertices];
+
+    for (int i = 0; i < num_vertices; i++)
+    {
+        v_adj_begin[i] = v_adj_begin_u[sorted[i].second];
+        v_adj_length[i] = v_adj_length_u[sorted[i].second];
+        mapping_old_to_new[sorted[i].second] = i;
+    }
+
+    for (int i = 0; i < num_edges; i++)
+    {
+        v_adj_list[i] = mapping_old_to_new[v_adj_list_u[i]];
+    }
+
+    int start_vertex = mapping_old_to_new[start_vertex_u];
+
+    result[start_vertex] = 0;
 
     cudaMalloc(&k_v_adj_list, sizeof(int) * num_edges);
     cudaMalloc(&k_v_adj_begin, sizeof(int) * num_vertices);
@@ -72,12 +102,15 @@ int bfs_cuda_frontier_numbers(
 
     auto start_time = chrono::high_resolution_clock::now();
 
+    //int num_threads = BLOCKS * THREADS;
+    //int segment_size = (num_vertices + num_threads - 1) / num_threads;; // divide and round up
+
     do
     {
         *still_running = false;
         cudaMemcpy(k_still_running, still_running, sizeof(bool) * 1, cudaMemcpyHostToDevice);
 
-        kernel_cuda_frontier_numbers<<<BLOCKS, THREADS>>>(
+        kernel_cuda_frontier_numbers_reorder<<<BLOCKS, THREADS>>>(
             k_v_adj_list, 
             k_v_adj_begin, 
             k_v_adj_length, 
@@ -106,13 +139,29 @@ int bfs_cuda_frontier_numbers(
 
 
 
-    cudaMemcpy(result, k_result, sizeof(int) * num_vertices, cudaMemcpyDeviceToHost);
+    // Result still has the wrong ordering
+    int *result2 = new int[num_vertices];
+    cudaMemcpy(result2, k_result, sizeof(int) * num_vertices, cudaMemcpyDeviceToHost);
+
+    // Restore original order
+    for (int i = 0; i < num_vertices; i++)
+    {
+        //result[i] = sorted[i].second;
+        result[sorted[i].second] = result2[i];
+    }
 
     cudaFree(k_v_adj_list);
     cudaFree(k_v_adj_begin);
     cudaFree(k_v_adj_length);
     cudaFree(k_result);
     cudaFree(k_still_running);
+
+    free(mapping_old_to_new);
+    free(v_adj_list);
+    free(v_adj_begin);
+    free(v_adj_length);
+    free(sorted);
+    free(result2);
 
     // printf("%i kernel runs\n", kernel_runs);
 
