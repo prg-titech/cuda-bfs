@@ -14,7 +14,7 @@ using namespace std;
 #define BLOCKS 128
 #define THREADS 256
 
-#define MAX_DIST 32768
+#define MAX_DIST 1073741824
 
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
@@ -126,11 +126,11 @@ int run_bfs(bfs_func func, graph_t *graph, int start_vertex, int *expected)
             {
                 if (result[i] != expected[i])
                 {
-                    printf("[%i] Expected %i, found %i\n", i, expected[i], result[i]);
+                    //printf("[%i] Expected %i, found %i\n", i, expected[i], result[i]);
                 }
             }
 
-            return 0;
+            return -1;
         }
     }
 
@@ -210,7 +210,11 @@ void run_all_bfs(graph_t *graph, int start_vertex)
     //printf("F");
 
     // Run BFS on CUDA - shared queue
-    //run_bfs(&bfs_cuda_frontier_queue, graph, start_vertex, result);
+    if (!run_bfs(&bfs_cuda_frontier_queue, graph, start_vertex, result))
+    {
+        printf("bfs_cuda_frontier_queue failed\n");
+        exit(1);
+    }
     //printf("G");
 
     // Run BFS on CUDA - explicit queue with prefix sum
@@ -287,7 +291,7 @@ int main(int argc, char *argv[])
 
     int num_vertices = next_index;
 
-    printf("Input file has %d vertices\n", num_vertices);
+    printf("Input file has %d vertices and %i edges\n", num_vertices, num_edges);
 
     // Build adajacency lists (still reading file)
     infile.clear();

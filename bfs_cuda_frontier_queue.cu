@@ -2,6 +2,7 @@
 // http://dl.acm.org/citation.cfm?id=1782200
 
 #define BLOCK_QUEUE_SIZE 8192
+#define MAX_KERNEL_RUNS 2048
 
 __global__ void kernel_cuda_frontier_queue(
     int *v_adj_list,
@@ -56,27 +57,33 @@ __global__ void kernel_cuda_frontier_queue(
                 }
             }
         }
-    }
 
-    __syncthreads();
+        __syncthreads();
 
-    __shared__ int global_offset;
+        __shared__ int global_offset;
 
-    if (threadIdx.x == 0)
-    {
-        // First value is size of queue
-        global_offset = atomicAdd(output_queue, queue_size);
-    }
-
-    __syncthreads();
-
-    // Copy queue to global memory
-    for (int i = 0; i < queue_size; i += blockDim.x)
-    {
-        if (i + threadIdx.x < queue_size)
+        if (threadIdx.x == 0)
         {
-            output_queue[global_offset + i + threadIdx.x + 1] = next_queue[i + threadIdx.x];
+            // First value is size of queue
+            global_offset = atomicAdd(output_queue, queue_size);
         }
+
+        __syncthreads();
+
+        // Copy queue to global memory
+        for (int i = 0; i < queue_size; i += blockDim.x)
+        {
+            if (i + threadIdx.x < queue_size)
+            {
+                output_queue[global_offset + i + threadIdx.x + 1] = next_queue[i + threadIdx.x];
+            }
+        }
+
+        __syncthreads();
+
+        queue_size = 0;
+
+        __syncthreads();
     }
 }
 
@@ -146,6 +153,11 @@ int bfs_cuda_frontier_queue(
             k_output_queue);
 
         kernel_runs++;
+
+        if (kernel_runs > MAX_KERNEL_RUNS)
+        {
+            return -1;
+        }
 
         // Swap queues
         int *tmp = k_input_queue;
