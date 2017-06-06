@@ -35,7 +35,7 @@ struct graph_t
     int num_edges;
 };
 
-bool report_time = false;
+int report_time = false;
 
 #include "bfs_cpu.cu"
 #include "bfs_cuda_simple.cu"
@@ -55,51 +55,17 @@ typedef int (* bfs_func)(int*, int*, int*, int, int, int, int*);
 int runs;
 #define RT_STUDY_NUM_V 20
 
-int run_bfs(bfs_func func, graph_t *graph, int start_vertex, int *expected)
+int run_bfs(bfs_func func, graph_t *graph, int start_vertex, int *expected, int runs)
 {
     int *result = new int[graph->num_vertices];
 
-    int runtime = 0;
-
-    if (start_vertex == -2)
-    {
-        // Performance study: Choose multiple start vertices and calculate avg
-        double rt_sum = 0.0;
-
-        for (int i = 0; i < RT_STUDY_NUM_V; i++)
-        {
-            int runtime = 0;
-
-            for (int j = 0; j < runs; j++) 
-            {
-                int next_time = func(
-                    graph->v_adj_list, 
-                    graph->v_adj_begin, 
-                    graph->v_adj_length, 
-                    graph->num_vertices, 
-                    graph->num_edges,
-                    i, 
-                    result);
-
-                if (runtime == 0)
-                {
-                    runtime = next_time;
-                }
-                else
-                {
-                    runtime = min(next_time, runtime);
-                }
-            }
-
-            rt_sum += runtime;
-        }
-
-        printf("%f\n", rt_sum / RT_STUDY_NUM_V);
-        return (int) (rt_sum / RT_STUDY_NUM_V);
-    }
+    int runtime = 1073741824;
 
     for (int i = 0; i < runs; i++)
     {
+        // Reset result array
+        memset(result, 0, sizeof(int) * graph->num_vertices);
+
         int next_time = func(
             graph->v_adj_list, 
             graph->v_adj_begin, 
@@ -109,34 +75,13 @@ int run_bfs(bfs_func func, graph_t *graph, int start_vertex, int *expected)
             start_vertex, 
             result);
 
-        if (runtime == 0)
-        {
-            runtime = next_time;
-        }
-        else
-        {
-            runtime = min(next_time, runtime);
-        }
-
+        runtime = min(next_time, runtime);
+        
         if (!equal(result, result + graph->num_vertices, expected))
         {
-            printf("Result incorrect\n");
-            printf("DIFF:\n");
-            for (int i = 0; i < graph->num_vertices; i++)
-            {
-                if (result[i] != expected[i])
-                {
-                    //printf("[%i] Expected %i, found %i\n", i, expected[i], result[i]);
-                }
-            }
-
+            // Wrong result
             return -1;
         }
-    }
-
-    if (runs > 1)
-    {
-        printf("%i\n", runtime);
     }
 
     free(result);
@@ -144,114 +89,96 @@ int run_bfs(bfs_func func, graph_t *graph, int start_vertex, int *expected)
     return runtime;
 }
 
-// 2nd version: Only active vertices are working
-// 3rd version: Active vertices + load balancing
-// 4th version: Virtual warp-centric programming
-// 5th version: Hierarchical queue: http://impact.crhc.illinois.edu/shared/papers/effective2010.pdf
-
-// ... version: Try to utilize shared memory
-
 void run_all_bfs(graph_t *graph, int start_vertex)
 {
-    // Run BFS
-    int *result = new int[graph->num_vertices];
+    const bfs_func bfs_functions[] = {
+        &bfs_cuda_simple, 
+        &bfs_cuda_frontier, 
+        &bfs_cuda_frontier_numbers, 
+        &bfs_cuda_virtual_wc, 
+        &bfs_cuda_per_edge_basic, 
+        &bfs_cuda_per_edge_frontier_numbers, 
+        &bfs_cuda_frontier_queue, 
+        &bfs_cuda_frontier_scan, 
+        &bfs_cuda_frontier_numbers_sort, 
+        &bfs_cuda_frontier_numbers_defer, 
+        &bfs_cuda_frontier_numbers_reorder};
 
-    if (start_vertex != -2)
+    string bfs_names[] = {
+        "bfs_cuda_simple",
+        "bfs_cuda_frontier", 
+        "bfs_cuda_frontier_numbers", 
+        "bfs_cuda_virtual_wc", 
+        "bfs_cuda_per_edge_basic", 
+        "bfs_cuda_per_edge_frontier_numbers", 
+        "bfs_cuda_frontier_queue", 
+        "bfs_cuda_frontier_scan", 
+        "bfs_cuda_frontier_numbers_sort", 
+        "bfs_cuda_frontier_numbers_defer", 
+        "bfs_cuda_frontier_numbers_reorder"};
+    
+    int num_bfs = sizeof(bfs_functions) / sizeof(*bfs_functions);
+    double *runtime = new double[num_bfs]();
+    bool *wrong_result = new bool[num_bfs]();
+
+    int range_from, range_to;
+    if (start_vertex == -1)
     {
-        bfs_sequential(graph, start_vertex, result);
+        // Run for all start vertices
+        range_from = 0;
+        range_to = graph->num_vertices;
+    }
+    else if (start_vertex == -2)
+    {
+        // Run for RT_STUDY_NUM_V many vertices
+        range_from = 0;
+        range_to = RT_STUDY_NUM_V;
+    }
+    else
+    {
+        range_from = start_vertex;
+        range_to = start_vertex + 1;
     }
 
-    // Run BFS on CUDA
-    if (!run_bfs(&bfs_cuda_simple, graph, start_vertex, result))
-    {
-        printf("bfs_cuda_simple failed\n");
-        exit(1);
-    }
-    //printf("A");
+    
+    int *expected = new int[graph->num_vertices];
 
-    // Run BFS on CUDA - frontier
-    if (!run_bfs(&bfs_cuda_frontier, graph, start_vertex, result))
+    for (int vertex = range_from; vertex < range_to; vertex++)
     {
-        printf("bfs_cuda_frontier failed\n");
-        exit(1);
-    }
-    //printf("B");
+        bfs_sequential(graph, vertex, expected);
 
-    // Run BFS on CUDA - frontier as number
-    if (!run_bfs(&bfs_cuda_frontier_numbers, graph, start_vertex, result))
-    {
-        printf("bfs_cuda_frontier_numbers failed\n");
-        exit(1);
-    }
-    //printf("C");
+        for (int i = 0; i < num_bfs; i++)
+        {
+            cudaDeviceReset();
+            int next_runtime = run_bfs(bfs_functions[i], graph, vertex, expected, runs);
 
-    // Run BFS on CUDA - virtual warp centric
-    if (!run_bfs(&bfs_cuda_virtual_wc, graph, start_vertex, result))
-    {
-        printf("bfs_cuda_virtual_wc failed\n");
-        exit(1);
-    }
-    //printf("D");
-
-    // Run BFS on CUDA - parallelize per edges
-    if (!run_bfs(&bfs_cuda_per_edge_basic, graph, start_vertex, result))
-    {
-        printf("bfs_cuda_per_edge_basic failed\n");
-        exit(1);
-    }
-    //printf("E");
-
-    // Run BFS on CUDA - parallelize per edges, frontier as number
-    if (!run_bfs(&bfs_cuda_per_edge_frontier_numbers, graph, start_vertex, result))
-    {
-        printf("bfs_cuda_per_edge_frontier_numbers failed\n");
-        exit(1);
-    }
-    //printf("F");
-
-    // Run BFS on CUDA - shared queue
-    if (!run_bfs(&bfs_cuda_frontier_queue, graph, start_vertex, result))
-    {
-        printf("bfs_cuda_frontier_queue failed\n");
-        exit(1);
-    }
-    //printf("G");
-
-    // Run BFS on CUDA - explicit queue with prefix sum
-    //run_bfs(&bfs_cuda_frontier_scan, graph, start_vertex, result);
-    //printf("H");
-
-    // Run BFS on CUDA - frontier as number + sorted
-    if (!run_bfs(&bfs_cuda_frontier_numbers_sort, graph, start_vertex, result))
-    {
-        printf("bfs_cuda_frontier_numbers_sort failed\n");
-        exit(1);
-    }
-    //printf("I");
-
-    // Run BFS on CUDA - frontier as number + defer outliers
-    if (!run_bfs(&bfs_cuda_frontier_numbers_defer, graph, start_vertex, result))
-    {
-        printf("bfs_cuda_frontier_numbers_defer failed\n");
-        exit(1);
-    }
-    //printf("J");
-
-    // Runs BFS on CUDA - frontier as number + reordered
-    if (!run_bfs(&bfs_cuda_frontier_numbers_reorder, graph, start_vertex, result))
-    {
-        printf("bfs_cuda_simple failed\n");
-        exit(1);
-    }
-    //printf("K");
-
-    if (!report_time)
-    {
-        printf(".\n");
+            if (next_runtime == -1)
+            {
+                // Wrong result
+                wrong_result[i] = true;
+            }
+            else
+            {
+                runtime[i] += next_runtime;
+            }
+        }
     }
 
-    free(result);
-    fflush(stdout);
+    for (int i = 0; i < num_bfs; i++)
+    {
+        double avg_runtime = runtime[i] / (range_to - range_from);
+
+        if (!wrong_result[i])
+        {
+            printf("%s,%f\n", bfs_names[i].c_str(), avg_runtime);
+        }
+        else
+        {
+            printf("%s,-1\n", bfs_names[i].c_str());
+        }
+    }
+
+    free(expected);
 }
 
 int main(int argc, char *argv[])
@@ -310,6 +237,7 @@ int main(int argc, char *argv[])
         max_degree = max(max_degree, (int) v_adj_lists[index_map[from]].size());
     }
 
+    /*
     // Show degree distribution
     printf("Compute out-degree histogram\n");
     int *degree_histogram = new int[max_degree + 1]();
@@ -323,8 +251,9 @@ int main(int argc, char *argv[])
 
     for (int i = 0; i < max_degree + 1; i++)
     {
-        //printf("deg %i        %i\n", i, degree_histogram[i]);
+        printf("deg %i        %i\n", i, degree_histogram[i]);
     }
+    */
 
     // Generate data structure
     printf("Build ajacency lists\n");
@@ -349,24 +278,7 @@ int main(int argc, char *argv[])
     graph->num_edges = num_edges;
 
     printf("Running...\n");
-    if (start_vertex == -1)
-    {
-        // Test correctness for all start vertices
-        for (int i = 0; i < graph->num_vertices; i++)
-        {
-            run_all_bfs(graph, i);
-        }
-    }
-    else if (start_vertex == -2)
-    {
-        // Performance study
-        run_all_bfs(graph, start_vertex);
-    }
-    else
-    {
-        report_time = runs == 1;
-        run_all_bfs(graph, start_vertex);
-    }
+    run_all_bfs(graph, start_vertex);
 
     printf("\n");
 }
