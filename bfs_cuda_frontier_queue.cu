@@ -2,7 +2,6 @@
 // http://dl.acm.org/citation.cfm?id=1782200
 
 #define BLOCK_QUEUE_SIZE 8192
-#define MAX_KERNEL_RUNS 2048
 
 __global__ void kernel_cuda_frontier_queue(
     int *v_adj_list,
@@ -16,6 +15,8 @@ __global__ void kernel_cuda_frontier_queue(
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int num_threads = blockDim.x * gridDim.x;
+
+    //assert(false);
 
     // TODO: Read to shared memory? Maybe also the input queue?
     __shared__ int input_queue_size;

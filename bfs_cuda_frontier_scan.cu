@@ -1,6 +1,12 @@
 // Accelerating large graph algorithms on the GPU using CUDA
 // http://dl.acm.org/citation.cfm?id=1782200
 
+#include <math.h>
+//#include <cutil.h>
+
+// includes, kernels
+#include "nvidia/scan.cu"  // defines prescanArray()
+
 __global__ void kernel_cuda_frontier_scan_main(
     int *v_adj_list,
     int *v_adj_begin,
@@ -38,16 +44,15 @@ __global__ void kernel_cuda_frontier_scan_main(
 
 __global__ void kernel_cuda_frontier_scan(
     int num_vertices,
-    int ceil_num_vertices,
     bool *updated,
     bool *frontier,
     bool *visited,
-    int *prefix_sum)
+    int *prefix_in_array)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int num_threads = blockDim.x * gridDim.x;
 
-    for (int v = 0; v < ceil_num_vertices; v += num_threads)
+    for (int v = 0; v < num_vertices; v += num_threads)
     {
         int vertex = v + tid;
 
@@ -59,102 +64,11 @@ __global__ void kernel_cuda_frontier_scan(
             }
 
             frontier[vertex] = updated[vertex];
-            prefix_sum[vertex] = updated[vertex];
+            prefix_in_array[vertex] = updated[vertex];
 
             updated[vertex] = false;
         }
-        else if (vertex < ceil_num_vertices)
-        {
-            frontier[vertex] = false;
-            prefix_sum[vertex] = 0;
-        }
     }
-}
-
-__global__ void kernel_cuda_up_sweep( 
-    int *prefix_sum,
-    int d,
-    int offset)
-{
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-     
-    if (tid < d)
-    {
-        int ai = offset * (2 * tid + 1) - 1;
-        int bi = offset * (2 * tid + 2) - 1;
-
-        prefix_sum[bi] += prefix_sum[ai];
-    }
-}
-
-__global__ void kernel_cuda_down_sweep( 
-    int *prefix_sum,
-    int d,
-    int offset)
-{
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (tid < d)
-    {
-        int ai = offset * (2 * tid + 1) - 1;
-        int bi = offset * (2 * tid + 2) - 1;
-
-        int temp = prefix_sum[ai];
-        prefix_sum[ai] = prefix_sum[bi];
-        prefix_sum[bi] += temp;
-    }
-}
-
-__global__ void kernel_cuda_combined_sweeps(int *g_odata, int *g_idata, int n)
-{
-    __shared__ int temp[1024];  // allocated on invocation
-    int thid = threadIdx.x;
-    int offset = 1;
-
-        
-
-    temp[2*thid] = g_idata[2*thid]; // load input into shared memory
-    temp[2*thid+1] = g_idata[2*thid+1];
-
-
-    for (int d = n>>1; d > 0; d >>= 1)                    // build sum in place up the tree
-    { 
-        __syncthreads();
-        
-        if (thid < d)
-        {
-            int ai = offset*(2*thid+1)-1;
-            int bi = offset*(2*thid+2)-1;
-            temp[bi] += temp[ai];
-        }
-   
-        offset *= 2;
-    }
-   
-    if (thid == 0) { temp[n - 1] = 0; } // clear the last element
-               
-    
-    for (int d = 1; d < n; d *= 2) // traverse down tree & build scan
-    {
-        offset >>= 1;
-        __syncthreads();
-
-        if (thid < d)                     
-        {
-            int ai = offset*(2*thid+1)-1;
-            int bi = offset*(2*thid+2)-1;
-    
-       
-            int t = temp[ai];
-            temp[ai] = temp[bi];
-            temp[bi] += t; 
-        }
-    }
-
-    __syncthreads();
-
-    g_odata[2*thid] = temp[2*thid]; // write results to device memory
-    g_odata[2*thid+1] = temp[2*thid+1];
 }
 
 __global__ void kernel_cuda_generate_queue(
@@ -164,17 +78,22 @@ __global__ void kernel_cuda_generate_queue(
     int num_vertices)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int num_threads = blockDim.x * gridDim.x;
 
-
-    if (tid < num_vertices && frontier[tid])
+    for (int v = 0; v < num_vertices; v += num_threads)
     {
-        queue[prefix_sum[tid] + 1] = tid;
+        int vertex = v + tid;
+
+        if (vertex < num_vertices && frontier[vertex])
+        {
+            queue[prefix_sum[vertex] + 1] = vertex;
+        }
     }
 
     // Set size of queue
-    if (tid == num_vertices - 1)
+    if (tid == 0)
     {
-        queue[0] = prefix_sum[tid] + (int) frontier[tid];
+        queue[0] = prefix_sum[num_vertices - 1] + (int) frontier[num_vertices - 1];
     }
 }
 
@@ -196,12 +115,11 @@ int bfs_cuda_frontier_scan(
     bool *k_visited;
     int *k_queue;
     int *k_prefix_sum;
+    int *k_prefix_in_array;
 
     int kernel_runs = 0;
 
-    int ceil_num_vertices = (int) pow(2, ceil(log(num_vertices)/log(2)));
-
-    int *prefix_sum = new int[ceil_num_vertices];
+    int *prefix_sum = new int[num_vertices];
 
     bool *updated = new bool[num_vertices];
     fill_n(updated, num_vertices, false);
@@ -210,25 +128,25 @@ int bfs_cuda_frontier_scan(
     fill_n(visited, num_vertices, false);
     visited[start_vertex] = true;
 
-    bool *frontier = new bool[ceil_num_vertices];
-    fill_n(frontier, ceil_num_vertices, false);
+    bool *frontier = new bool[num_vertices];
+    fill_n(frontier, num_vertices, false);
     frontier[start_vertex] = true;
 
     fill_n(result, num_vertices, MAX_DIST);
     result[start_vertex] = 0;
 
     int *queue = new int[num_vertices];
-    int zero_value = 0;
 
     cudaMalloc(&k_v_adj_list, sizeof(int) * num_edges);
     cudaMalloc(&k_v_adj_begin, sizeof(int) * num_vertices);
     cudaMalloc(&k_v_adj_length, sizeof(int) * num_vertices);
     cudaMalloc(&k_result, sizeof(int) * num_vertices);
     cudaMalloc(&k_updated, sizeof(bool) * num_vertices);
-    cudaMalloc(&k_frontier, sizeof(bool) * ceil_num_vertices);
+    cudaMalloc(&k_frontier, sizeof(bool) * num_vertices);
     cudaMalloc(&k_visited, sizeof(bool) * num_vertices);
     cudaMalloc(&k_queue, sizeof(int) * (num_vertices + 1));     // First one is #elements
-    cudaMalloc(&k_prefix_sum, sizeof(int) * ceil_num_vertices);
+    cudaMalloc(&k_prefix_sum, sizeof(int) * num_vertices);
+    cudaMalloc(&k_prefix_in_array, sizeof(int) * num_vertices);
 
     cudaMemcpy(k_v_adj_list, v_adj_list, sizeof(int) * num_edges, cudaMemcpyHostToDevice);
     cudaMemcpy(k_v_adj_begin, v_adj_begin, sizeof(int) * num_vertices, cudaMemcpyHostToDevice);
@@ -236,20 +154,19 @@ int bfs_cuda_frontier_scan(
     cudaMemcpy(k_result, result, sizeof(int) * num_vertices, cudaMemcpyHostToDevice);
     cudaMemcpy(k_updated, updated, sizeof(bool) * num_vertices, cudaMemcpyHostToDevice);
     cudaMemcpy(k_visited, visited, sizeof(bool) * num_vertices, cudaMemcpyHostToDevice);
-    cudaMemcpy(k_frontier, frontier, sizeof(bool) * ceil_num_vertices, cudaMemcpyHostToDevice);
+    cudaMemcpy(k_frontier, frontier, sizeof(bool) * num_vertices, cudaMemcpyHostToDevice);
 
 
     // --- START MEASURE TIME ---
 
 
     auto start_time = chrono::high_resolution_clock::now();
-
-    int reduce_steps = (int) ceil(log(ceil_num_vertices)/log(2));
     
     queue[0] = 1;
     queue[1] = start_vertex;
 
     cudaMemcpy(k_queue, queue, sizeof(int) * 2, cudaMemcpyHostToDevice);
+    preallocBlockSums(num_vertices);
 
     while (queue[0] > 0)
     {
@@ -263,54 +180,15 @@ int bfs_cuda_frontier_scan(
             k_updated,
             k_visited);
 
-        gpuErrchk(cudaThreadSynchronize());
-
         kernel_cuda_frontier_scan<<<BLOCKS, THREADS>>>(
             num_vertices,
-            ceil_num_vertices,
             k_updated,
             k_frontier,
             k_visited,
-            k_prefix_sum);
+            k_prefix_in_array);
 
-        gpuErrchk(cudaThreadSynchronize());
-
-
-        if (ceil_num_vertices > 1024)
-        {
-            // Prefix sum algorithm: https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch39.html
-            // Up Sweep
-            int offset = 1;
-
-            for (int d = ceil_num_vertices >> 1; d > 0; d >>= 1)
-            {
-                kernel_cuda_up_sweep<<<2 * BLOCKS, THREADS>>>(k_prefix_sum, d, offset);
-                offset *= 2;
-            }
-
-            // Clear last
-            cudaMemcpy(k_prefix_sum + ceil_num_vertices - 1, &zero_value, sizeof(int) * 1, cudaMemcpyHostToDevice);
-
-            // Down Sweep
-            for (int d = 1; d < ceil_num_vertices; d *= 2)
-            {
-                offset >>= 1;
-                kernel_cuda_down_sweep<<<2 * BLOCKS, THREADS>>>(k_prefix_sum, d, offset);
-            }
-        }
-        else
-        {
-            kernel_cuda_combined_sweeps<<<1, ceil_num_vertices>>>(
-                k_prefix_sum, k_prefix_sum, ceil_num_vertices);
-        }
-
-        /*cudaMemcpy(prefix_sum k_prefix_sum, sizeof(int) * ceil_num_vertices, cudaMemcpyDeviceToHost);
-
-        for (int  i = 0; i < ceil_num_vertices; i++)
-        {
-            printf("%i\n", prefix_sum[i]);
-        }*/
-
+        prescanArray(k_prefix_sum, k_prefix_in_array, num_vertices);
+        //cudaThreadSynchronize();
 
         // Generate new queue
         kernel_cuda_generate_queue<<<BLOCKS, THREADS>>>(
@@ -318,11 +196,14 @@ int bfs_cuda_frontier_scan(
             k_frontier, 
             k_queue,
             num_vertices);
-        gpuErrchk(cudaThreadSynchronize());
-
-        //exit(1);
+        //gpuErrchk(cudaThreadSynchronize());
 
         kernel_runs++;
+
+        if (kernel_runs > MAX_KERNEL_RUNS)
+        {
+            return -1;
+        }
 
         cudaMemcpy(queue, k_queue, sizeof(int) * num_vertices, cudaMemcpyDeviceToHost);
     }
@@ -349,6 +230,7 @@ int bfs_cuda_frontier_scan(
     cudaFree(k_result);
     cudaFree(k_updated);
     cudaFree(k_frontier);
+    cudaFree(k_prefix_in_array);
     cudaFree(k_visited);
     cudaFree(k_prefix_sum);
     cudaFree(k_queue);

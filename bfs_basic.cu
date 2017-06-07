@@ -8,13 +8,15 @@
 #include <map>
 #include <iterator>
 #include <chrono>
+#include <assert.h>
 
 using namespace std;
 
-#define BLOCKS 128
-#define THREADS 256
+int BLOCKS = 0;
+int THREADS = 0;
 
 #define MAX_DIST 1073741824
+#define MAX_KERNEL_RUNS 2048
 
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
@@ -98,11 +100,11 @@ void run_all_bfs(graph_t *graph, int start_vertex)
         &bfs_cuda_virtual_wc, 
         &bfs_cuda_per_edge_basic, 
         &bfs_cuda_per_edge_frontier_numbers, 
-        &bfs_cuda_frontier_queue, 
         &bfs_cuda_frontier_scan, 
         &bfs_cuda_frontier_numbers_sort, 
         &bfs_cuda_frontier_numbers_defer, 
-        &bfs_cuda_frontier_numbers_reorder};
+        &bfs_cuda_frontier_numbers_reorder,
+        &bfs_cuda_frontier_queue};
 
     string bfs_names[] = {
         "bfs_cuda_simple",
@@ -111,11 +113,11 @@ void run_all_bfs(graph_t *graph, int start_vertex)
         "bfs_cuda_virtual_wc", 
         "bfs_cuda_per_edge_basic", 
         "bfs_cuda_per_edge_frontier_numbers", 
-        "bfs_cuda_frontier_queue", 
         "bfs_cuda_frontier_scan", 
         "bfs_cuda_frontier_numbers_sort", 
         "bfs_cuda_frontier_numbers_defer", 
-        "bfs_cuda_frontier_numbers_reorder"};
+        "bfs_cuda_frontier_numbers_reorder",
+        "bfs_cuda_frontier_queue"};
     
     int num_bfs = sizeof(bfs_functions) / sizeof(*bfs_functions);
     double *runtime = new double[num_bfs]();
@@ -149,7 +151,6 @@ void run_all_bfs(graph_t *graph, int start_vertex)
 
         for (int i = 0; i < num_bfs; i++)
         {
-            cudaDeviceReset();
             int next_runtime = run_bfs(bfs_functions[i], graph, vertex, expected, runs);
 
             if (next_runtime == -1)
@@ -170,11 +171,11 @@ void run_all_bfs(graph_t *graph, int start_vertex)
 
         if (!wrong_result[i])
         {
-            printf("%s,%f\n", bfs_names[i].c_str(), avg_runtime);
+            printf("%s,%i,%i,%f\n", bfs_names[i].c_str(), BLOCKS, THREADS, avg_runtime);
         }
         else
         {
-            printf("%s,-1\n", bfs_names[i].c_str());
+            printf("%s,%i,%i,-1\n", bfs_names[i].c_str(), BLOCKS, THREADS);
         }
     }
 
@@ -183,14 +184,16 @@ void run_all_bfs(graph_t *graph, int start_vertex)
 
 int main(int argc, char *argv[])
 {
-    if (argc != 4)
+    if (argc != 6)
     {
-        printf("Usage %s filename vertex_id runs.\n", argv[0]);
+        printf("Usage: %s filename vertex_id runs blocks threads.\n", argv[0]);
         exit(1);
     }
 
     int start_vertex = atoi(argv[2]);
     runs = atoi(argv[3]);
+    BLOCKS = atoi(argv[4]);
+    THREADS = atoi(argv[5]);
 
     // Find number of vertices
     printf("Reading input file\n");

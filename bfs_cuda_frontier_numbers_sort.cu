@@ -76,7 +76,7 @@ int bfs_cuda_frontier_numbers_sort(
         reordering[i] = sorted[i].second;
     }
 
-    cudaMalloc(&k_v_adj_list, sizeof(int) * num_edges);
+    gpuErrchk(cudaMalloc(&k_v_adj_list, sizeof(int) * num_edges));
     cudaMalloc(&k_v_adj_begin, sizeof(int) * num_vertices);
     cudaMalloc(&k_v_adj_length, sizeof(int) * num_vertices);
     cudaMalloc(&k_result, sizeof(int) * num_vertices);
