@@ -7,7 +7,7 @@
 #include <vector>
 #include <map>
 #include <iterator>
-#include <chrono>
+#include <sys/time.h>
 #include <assert.h>
 
 using namespace std;
@@ -38,6 +38,14 @@ struct graph_t
 };
 
 int report_time = false;
+
+/* in milliseconds (ms) */
+long get_elapsed_time(struct timeval *begin, struct timeval *end)
+{
+    return (end->tv_sec - begin->tv_sec) * 1000 * 1000
+            + (end->tv_usec - begin->tv_usec); /// 1000.0;
+}
+
 
 #include "bfs_cpu.cu"
 #include "bfs_cuda_simple.cu"

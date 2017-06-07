@@ -160,7 +160,8 @@ int bfs_cuda_frontier_scan(
     // --- START MEASURE TIME ---
 
 
-    auto start_time = chrono::high_resolution_clock::now();
+    struct timeval t1, t2;
+    gettimeofday(&t1, NULL);
     
     queue[0] = 1;
     queue[1] = start_vertex;
@@ -210,8 +211,8 @@ int bfs_cuda_frontier_scan(
 
     cudaThreadSynchronize();
 
-    auto end_time = chrono::high_resolution_clock::now();
-    long long time = chrono::duration_cast<chrono::microseconds>(end_time - start_time).count();
+    gettimeofday(&t2, NULL);
+    long long time = get_elapsed_time(&t1, &t2);
 
     if (report_time)
     {

@@ -76,7 +76,8 @@ int bfs_cuda_per_edge_basic(
     // --- START MEASURE TIME ---
 
 
-    auto start_time = chrono::high_resolution_clock::now();
+    struct timeval t1, t2;
+    gettimeofday(&t1, NULL);
 
     do
     {
@@ -97,8 +98,8 @@ int bfs_cuda_per_edge_basic(
 
     cudaThreadSynchronize();
 
-    auto end_time = chrono::high_resolution_clock::now();
-    long long time = chrono::duration_cast<chrono::microseconds>(end_time - start_time).count();
+    gettimeofday(&t2, NULL);
+    long long time = get_elapsed_time(&t1, &t2);
 
     if (report_time)
     {
