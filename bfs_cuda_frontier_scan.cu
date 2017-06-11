@@ -167,8 +167,15 @@ int bfs_cuda_frontier_scan(
     queue[1] = start_vertex;
 
     cudaMemcpy(k_queue, queue, sizeof(int) * 2, cudaMemcpyHostToDevice);
-    preallocBlockSums(num_vertices);
 
+    static bool prepared = false;
+
+    if (!prepared)
+    {
+        preallocBlockSums(num_vertices);
+        prepared = true;
+    }
+    
     while (queue[0] > 0)
     {
         kernel_cuda_frontier_scan_main<<<BLOCKS, THREADS>>>(

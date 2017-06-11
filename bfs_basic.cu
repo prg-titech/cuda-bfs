@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <vector>
 #include <map>
+#include <math.h>
 #include <iterator>
 #include <sys/time.h>
 #include <assert.h>
@@ -14,6 +15,7 @@ using namespace std;
 
 int BLOCKS = 0;
 int THREADS = 0;
+char *filename;
 
 #define MAX_DIST 1073741824
 #define MAX_KERNEL_RUNS 2048
@@ -179,11 +181,11 @@ void run_all_bfs(graph_t *graph, int start_vertex)
 
         if (!wrong_result[i])
         {
-            printf("%s,%i,%i,%f\n", bfs_names[i].c_str(), BLOCKS, THREADS, avg_runtime);
+            printf("%s,%s,%i,%i,%f\n", filename, bfs_names[i].c_str(), BLOCKS, THREADS, avg_runtime);
         }
         else
         {
-            printf("%s,%i,%i,-1\n", bfs_names[i].c_str(), BLOCKS, THREADS);
+            printf("%s,%s,%i,%i,-1\n", filename, bfs_names[i].c_str(), BLOCKS, THREADS);
         }
     }
 
@@ -198,13 +200,14 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
+    filename = argv[1];
     int start_vertex = atoi(argv[2]);
     runs = atoi(argv[3]);
     BLOCKS = atoi(argv[4]);
     THREADS = atoi(argv[5]);
 
     // Find number of vertices
-    printf("Reading input file\n");
+    // printf("Reading input file\n");
     ifstream infile(argv[1]);
     int from, to;
     int num_edges = 0;
@@ -248,16 +251,42 @@ int main(int argc, char *argv[])
         max_degree = max(max_degree, (int) v_adj_lists[index_map[from]].size());
     }
 
-    /*
+    
     // Show degree distribution
-    printf("Compute out-degree histogram\n");
+    // printf("Compute out-degree histogram\n");
     int *degree_histogram = new int[max_degree + 1]();
+    unsigned long long total_degree = 0;
 
     for (int i = 0; i < num_vertices; i++)
     {
         degree_histogram[v_adj_lists[i].size()]++;
+        total_degree += v_adj_lists[i].size();
     }
 
+    double avg_degree = total_degree / (double) num_vertices;
+    double degree_variance = 0.0;
+
+    for (int i = 0; i < num_vertices; i++)
+    {
+        degree_variance += (avg_degree - v_adj_lists[i].size()) * (avg_degree - v_adj_lists[i].size());
+    }
+    degree_variance /= num_vertices;
+
+    double degree_stddev = sqrt(degree_variance);
+
+    // Compute median
+    int *degs = new int[num_vertices];
+
+    for (int i = 0; i < num_vertices; i++)
+    {
+        degs[i] = v_adj_lists[i].size();
+    }
+
+    //sort(degs, degs + num_vertices);
+
+    printf("avg deg = %f, deg stddev = %f, median = %i\n", avg_degree, degree_stddev, degs[num_vertices / 2]);
+    
+    /*
     printf("Histogram for Vertex Degrees\n");
 
     for (int i = 0; i < max_degree + 1; i++)
@@ -267,7 +296,7 @@ int main(int argc, char *argv[])
     */
 
     // Generate data structure
-    printf("Build ajacency lists\n");
+    // printf("Build ajacency lists\n");
     int next_offset = 0;
 
     for (int i = 0; i < num_vertices; i++)
@@ -288,8 +317,8 @@ int main(int argc, char *argv[])
     graph->num_vertices = num_vertices;
     graph->num_edges = num_edges;
 
-    printf("Running...\n");
+    // printf("Running...\n");
     run_all_bfs(graph, start_vertex);
 
-    printf("\n");
+    // printf("\n");
 }
